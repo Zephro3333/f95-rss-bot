@@ -29,12 +29,15 @@ jobs:
       - name: Run bot
         run: python f95_rss.py
 
-      - name: Auto commit (safe)
-        uses: EndBug/add-and-commit@v9
-        with:
-          author_name: github-actions
-          author_email: github-actions@github.com
-          message: "auto update RSS"
-          add: |
-            f95_feed.xml
-            last_seen.json
+      - name: Push to RSS branch (safe)
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+
+          git checkout -B rss-output
+
+          git add f95_feed.xml last_seen.json
+
+          git commit -m "auto update RSS" || echo "no changes"
+
+          git push origin rss-output --force
