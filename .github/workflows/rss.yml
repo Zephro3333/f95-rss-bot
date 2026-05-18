@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -27,11 +29,15 @@ jobs:
       - name: Run bot
         run: python f95_rss.py
 
-      - name: Commit changes
+      - name: Commit and push safely
         run: |
           git config user.name github-actions
           git config user.email github-actions@github.com
+
           git add f95_feed.xml last_seen.json
-          git commit -m "auto update RSS" || exit 0
-          git push
-          
+
+          git commit -m "auto update RSS" || echo "no changes"
+
+          git pull --rebase origin main || true
+
+          git push origin main
