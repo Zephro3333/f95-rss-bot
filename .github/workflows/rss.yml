@@ -34,3 +34,4 @@ jobs:
           git add f95_feed.xml last_seen.json
           git commit -m "auto update RSS" || exit 0
           git push
+          
