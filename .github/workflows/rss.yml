@@ -2,7 +2,7 @@ name: F95 Discord Bot
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -38,6 +38,6 @@ jobs:
 
           git commit -m "update last seen" || echo "no changes"
 
-          git pull --rebase origin main
+          git pull --rebase origin main || true
 
-          git push
+          git push || git push --force
