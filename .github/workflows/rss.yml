@@ -29,7 +29,7 @@ jobs:
       - name: Run bot
         run: python f95_rss.py
 
-      - name: Commit and push safely
+      - name: Commit and push changes
         run: |
           git config user.name github-actions
           git config user.email github-actions@github.com
@@ -38,6 +38,11 @@ jobs:
 
           git commit -m "auto update RSS" || echo "no changes"
 
-          git pull --rebase origin main || true
+          git fetch origin main
+          git reset --hard origin/main
+
+          git add f95_feed.xml last_seen.json
+
+          git commit -m "auto update RSS" || echo "no changes"
 
           git push origin main
