@@ -1,8 +1,11 @@
 name: F95 RSS Bot
 
+permissions:
+  contents: write
+
 on:
   schedule:
-    - cron: "*/10 * * * *"   # a cada 10 minutos
+    - cron: "*/10 * * * *"
   workflow_dispatch:
 
 jobs:
