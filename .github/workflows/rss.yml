@@ -1,22 +1,20 @@
-name: F95 RSS Bot
-
-permissions:
-  contents: write
+name: F95 Discord Bot
 
 on:
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  build:
+  bot:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -24,20 +22,22 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install requests
 
-      - name: Run bot
-        run: python f95_rss.py
+      - name: Run Discord Bot
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python f95_discord_bot.py
 
-      - name: Push to RSS branch (safe)
+      - name: Save last seen posts
         run: |
           git config user.name github-actions
           git config user.email github-actions@github.com
 
-          git checkout -B rss-output
+          git add last_seen.json
 
-          git add f95_feed.xml last_seen.json
+          git commit -m "update last seen" || echo "no changes"
 
-          git commit -m "auto update RSS" || echo "no changes"
+          git pull --rebase origin main
 
-          git push origin rss-output --force
+          git push
