@@ -29,8 +29,12 @@ jobs:
       - name: Run bot
         run: python f95_rss.py
 
-      - name: Commit changes using GitHub bot (safe method)
-        uses: stefanzweifel/git-auto-commit-action@v5
+      - name: Auto commit (safe)
+        uses: EndBug/add-and-commit@v9
         with:
-          commit_message: "auto update RSS"
-          file_pattern: f95_feed.xml last_seen.json
+          author_name: github-actions
+          author_email: github-actions@github.com
+          message: "auto update RSS"
+          add: |
+            f95_feed.xml
+            last_seen.json
