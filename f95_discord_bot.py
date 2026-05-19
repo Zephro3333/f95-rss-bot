@@ -13,7 +13,6 @@ WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
 
 STATE_FILE = "last_seen.json"
 
-# comportamento
 HEARTBEAT_HOURS = 6
 SILENT_FAILURE_THRESHOLD_HOURS = 5
 
@@ -23,8 +22,12 @@ SILENT_FAILURE_THRESHOLD_HOURS = 5
 
 def load_state():
     if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+
     return {
         "seen": [],
         "last_update_ts": 0,
@@ -34,8 +37,11 @@ def load_state():
 
 
 def save_state(state):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(state, f)
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        print("STATE SAVE ERROR:", e)
 
 
 # =========================
@@ -44,7 +50,11 @@ def save_state(state):
 
 def send_discord(embed):
     try:
-        r = requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=15)
+        r = requests.post(
+            WEBHOOK_URL,
+            json={"embeds": [embed]},
+            timeout=15
+        )
         print("Discord status:", r.status_code)
     except Exception as e:
         print("Discord error:", e)
@@ -53,7 +63,7 @@ def send_discord(embed):
 def send_heartbeat(state):
     now = time.time()
 
-    if now - state["last_heartbeat_ts"] > HEARTBEAT_HOURS * 3600:
+    if now - state.get("last_heartbeat_ts", 0) > HEARTBEAT_HOURS * 3600:
         send_discord({
             "title": "🟢 F95 Bot Heartbeat",
             "description": "Bot is running normally.",
@@ -68,7 +78,8 @@ def send_alert(title, msg):
     send_discord({
         "title": title,
         "description": msg,
-        "color": 16711680
+        "color": 16711680,
+        "timestamp": datetime.utcnow().isoformat()
     })
 
 
@@ -80,38 +91,44 @@ def calculate_threshold(state):
     history = state.get("history_intervals", [])
 
     if len(history) < 3:
-        return 3 * 3600  # fallback: 3h
+        return 3 * 3600
 
     avg = sum(history) / len(history)
-
-    # fator adaptativo simples
     return avg * 3.5
 
 
 def update_history(state, interval):
+    if interval <= 0:
+        return
+
     history = state.get("history_intervals", [])
     history.append(interval)
 
-    # mantém leve (últimos 20 valores)
     state["history_intervals"] = history[-20:]
 
 
 # =========================
-# CORE FETCH
+# FETCH
 # =========================
 
 def fetch_posts():
-    r = requests.get(API_URL, timeout=30)
-    r.raise_for_status()
-    return r.json()["msg"]["data"]
+    try:
+        r = requests.get(API_URL, timeout=30)
+        r.raise_for_status()
+
+        data = r.json()
+        return data.get("msg", {}).get("data", [])
+    except Exception as e:
+        print("FETCH ERROR:", e)
+        return []
 
 
 def build_embed(post):
     return {
-        "title": post.get("title", "No title"),
-        "url": f"https://f95zone.to/threads/{post['thread_id']}",
+        "title": post.get("title") or "No title",
+        "url": f"https://f95zone.to/threads/{post.get('thread_id')}",
         "color": 65280,
-        "image": {"url": post.get("cover", "")},
+        "image": {"url": post.get("cover", "") or None},
         "fields": [
             {"name": "Creator", "value": post.get("creator", "Unknown"), "inline": True},
             {"name": "Version", "value": post.get("version", "N/A"), "inline": True},
@@ -123,85 +140,87 @@ def build_embed(post):
 
 
 # =========================
-# MAIN LOGIC
+# MAIN
 # =========================
 
 def main():
     print("🚀 Starting F95 bot...")
 
     state = load_state()
-    seen = set(state["seen"])
 
+    seen = set(state.get("seen", []))
     now = time.time()
 
-    try:
-        posts = fetch_posts()
-        print(f"📦 Posts found: {len(posts)}")
+    posts = fetch_posts()
 
-        new_seen = set(seen)
-        sent = 0
-        latest_ts = state["last_update_ts"]
+    if not posts:
+        print("⚠️ No posts fetched (possible API delay)")
+        return
 
-        for post in posts:
-            pid = str(post["thread_id"])
+    print(f"📦 Posts found: {len(posts)}")
 
-            if pid not in seen:
-                print("🆕 New post:", post["title"])
+    new_seen = set(seen)
+    sent = 0
 
-                send_discord(build_embed(post))
+    for post in posts:
+        pid = str(post.get("thread_id"))
 
-                new_seen.add(pid)
-                sent += 1
+        if not pid or pid in seen:
+            continue
 
-        # =========================
-        # interval tracking
-        # =========================
+        print("🆕 New post:", post.get("title", "Unknown"))
 
-        if state["last_update_ts"] != 0:
-            interval = now - state["last_update_ts"]
-            update_history(state, interval)
+        send_discord(build_embed(post))
 
-        state["last_update_ts"] = now
+        new_seen.add(pid)
+        sent += 1
 
-        # =========================
-        # silent failure detector
-        # =========================
+    # =========================
+    # interval tracking
+    # =========================
 
-        threshold = calculate_threshold(state)
-        time_since_update = now - state["last_update_ts"]
+    last_ts = state.get("last_update_ts", 0)
 
-        if time_since_update > SILENT_FAILURE_THRESHOLD_HOURS * 3600:
-            send_alert(
-                "⚠️ F95 Silent Delay Detected",
-                f"No updates for {round(time_since_update/3600, 2)}h"
-            )
+    if last_ts:
+        interval = now - last_ts
+        update_history(state, interval)
 
-        if time_since_update > threshold:
-            send_alert(
-                "🔴 Adaptive Critical Delay",
-                f"Delay exceeded adaptive threshold ({round(threshold/3600, 2)}h)"
-            )
+    state["last_update_ts"] = now
 
-        # =========================
-        # heartbeat
-        # =========================
+    # =========================
+    # silent failure detector
+    # =========================
 
-        send_heartbeat(state)
+    threshold = calculate_threshold(state)
+    time_since_update = now - state["last_update_ts"]
 
-        # =========================
-        # save state
-        # =========================
+    if time_since_update > SILENT_FAILURE_THRESHOLD_HOURS * 3600:
+        send_alert(
+            "⚠️ F95 Silent Delay Detected",
+            f"No updates for {round(time_since_update/3600, 2)}h"
+        )
 
-        state["seen"] = list(new_seen)
-        save_state(state)
+    if time_since_update > threshold:
+        send_alert(
+            "🔴 Adaptive Critical Delay",
+            f"Delay exceeded adaptive threshold ({round(threshold/3600, 2)}h)"
+        )
 
-        print(f"✅ Done. New posts sent: {sent}")
+    # =========================
+    # heartbeat
+    # =========================
 
-    except Exception as e:
-        send_alert("❌ Bot Crash", str(e))
-        print("ERROR:", e)
+    send_heartbeat(state)
+
+    # =========================
+    # save state
+    # =========================
+
+    state["seen"] = list(new_seen)
+    save_state(state)
+
+    print(f"✅ Done. New posts sent: {sent}")
 
 
 if __name__ == "__main__":
     main()
-    run()
