@@ -18,10 +18,8 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -34,12 +32,10 @@ jobs:
       - name: Run bot
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python f95_bot.py
 
-      # =========================
-      # SAFE COMMIT (NO REBASE, NO CONFLICTS)
-      # =========================
-      - name: Commit state safely
+      - name: Commit state
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
