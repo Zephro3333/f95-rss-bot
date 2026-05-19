@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -47,5 +47,5 @@ jobs:
 
           git diff --cached --quiet && exit 0
 
-          git commit -m "update state"
+          git commit -m "chore: update state"
           git push origin main
