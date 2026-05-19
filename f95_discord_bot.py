@@ -1,105 +1,115 @@
 import requests
 import json
 import os
+import hashlib
+import time
 
-# API do F95
 API_URL = "https://f95zone.to/sam/latest_alpha/latest_data.php?cmd=list&cat=games&page=1&sort=date"
-
-# webhook vindo dos GitHub Secrets
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
-
-# ficheiro para guardar posts já enviados
 STATE_FILE = "last_seen.json"
 
+# base config
+NORMAL_WINDOW = 50
+RECOVERY_WINDOW = 150  # anti-delay mode
+RECOVERY_THRESHOLD = 10  # se encontrar muitos novos → recovery
 
-# carregar posts antigos
-if os.path.exists(STATE_FILE):
-    with open(STATE_FILE, "r", encoding="utf-8") as f:
-        seen = set(json.load(f))
-else:
-    seen = set()
+
+def make_hash(post):
+    base = f"{post.get('thread_id')}-{post.get('title')}"
+    return hashlib.md5(base.encode()).hexdigest()
+
+
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return set()
+
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return set(json.load(f))
+    except:
+        return set()
+
+
+def save_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(list(state)[-800:], f)
 
 
 def send_to_discord(post):
-
-    embed = {
-        "title": post.get("title", "No title"),
-        "url": f"https://f95zone.to/threads/{post['thread_id']}",
-        "color": 65280,
-
-        # imagem do jogo
-        "image": {
-            "url": post.get("cover", "")
-        },
-
-        "fields": [
-            {
-                "name": "Creator",
-                "value": post.get("creator", "Unknown"),
-                "inline": True
-            },
-            {
-                "name": "Version",
-                "value": post.get("version", "N/A"),
-                "inline": True
-            },
-            {
-                "name": "Rating",
-                "value": str(post.get("rating", "0")),
-                "inline": True
-            }
-        ],
-
-        "footer": {
-            "text": "F95 Discord Bot"
+    try:
+        embed = {
+            "title": post.get("title", "No title"),
+            "url": f"https://f95zone.to/threads/{post['thread_id']}",
+            "color": 65280,
+            "image": {"url": post.get("cover", "")},
+            "footer": {"text": "F95 Bot - anti-delay mode"}
         }
-    }
 
-    payload = {
-        "embeds": [embed]
-    }
+        r = requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=15)
+        return r.status_code == 204
 
-    r = requests.post(WEBHOOK_URL, json=payload)
-
-    print("Discord status:", r.status_code)
+    except Exception as e:
+        print("Discord error:", e)
+        return False
 
 
-print("A ir buscar API...")
+def fetch_posts():
+    r = requests.get(API_URL, timeout=20)
+    r.raise_for_status()
+    return r.json()["msg"]["data"]
 
-try:
-    response = requests.get(API_URL, timeout=30)
-    response.raise_for_status()
 
-    json_data = response.json()
+def run():
 
-    posts = json_data["msg"]["data"]
+    print("Fetching API...")
 
-    print("Posts encontrados:", len(posts))
+    posts = fetch_posts()
 
+    seen = load_state()
     new_seen = set(seen)
 
-    sent = 0
+    normal_batch = posts[:NORMAL_WINDOW]
 
-    for post in posts:
+    new_count = 0
 
-        pid = str(post["thread_id"])
+    # 1️⃣ normal scan
+    for post in normal_batch:
+        pid = make_hash(post)
 
-        # evita repetir posts antigos
         if pid not in seen:
+            ok = send_to_discord(post)
 
-            print("Novo post:", post["title"])
+            if ok:
+                new_seen.add(pid)
+                new_count += 1
 
-            send_to_discord(post)
+    # 2️⃣ anti-delay detector
+    recovery_mode = False
 
-            new_seen.add(pid)
+    if new_count >= RECOVERY_THRESHOLD:
+        recovery_mode = True
+        print("⚠ Recovery mode activated (possible missed posts)")
 
-            sent += 1
+    # 3️⃣ recovery scan (deep scan)
+    if recovery_mode:
+        for post in posts[:RECOVERY_WINDOW]:
+            pid = make_hash(post)
 
-    # guardar estado
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(list(new_seen), f)
+            if pid not in new_seen:
+                print("RECOVERY FOUND:", post["title"])
 
-    print(f"OK - enviados {sent} novos posts")
+                ok = send_to_discord(post)
 
-except Exception as e:
-    print("ERRO:", e)
+                if ok:
+                    new_seen.add(pid)
+                    new_count += 1
+
+                time.sleep(0.2)  # anti spam / rate limit safety
+
+    save_state(new_seen)
+
+    print(f"Done. Total sent: {new_count}")
+
+
+if __name__ == "__main__":
+    run()
