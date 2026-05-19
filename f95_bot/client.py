@@ -6,13 +6,13 @@ WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 
 def fetch_posts():
-    for _ in range(3):  # retry anti-falha silenciosa
+    for _ in range(3):
         try:
             r = requests.get(API_URL, timeout=30)
             r.raise_for_status()
             return r.json()["msg"]["data"]
         except Exception as e:
-            print("Fetch error, retrying:", e)
+            print("API error retrying:", e)
 
     return []
 
@@ -25,7 +25,7 @@ def send_to_discord(post):
         "image": {"url": post.get("cover", "")},
         "fields": [
             {"name": "Creator", "value": post.get("creator", "N/A"), "inline": True},
-            {"name": "Version", "value": post.get("version", "N/A"), "inline": True},
+            {"name": "Version", "value": post.get("version", "N/A"), "inline": True}
         ]
     }
 
