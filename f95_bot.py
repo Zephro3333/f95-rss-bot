@@ -3,6 +3,7 @@ import os
 import time
 import json
 from datetime import datetime
+from workflow_health import auto_heal_workflow
 
 API_URL = "https://f95zone.to/sam/latest_alpha/latest_data.php?cmd=list&cat=games&page=1&sort=date"
 WEBHOOK = os.getenv("DISCORD_WEBHOOK")
@@ -13,8 +14,9 @@ STATE_FILE = "state.json"
 # CONFIG
 # =========================
 
-HEARTBEAT_INTERVAL = 6 * 60 * 60  # 6h
-MAX_RETRIES = 3
+HEARTBEAT_INTERVAL = 4 * 60 * 60
+RECOVERY_HOURS = 6
+RECOVERY_LIMIT = 20
 
 
 # =========================
@@ -24,8 +26,9 @@ MAX_RETRIES = 3
 def load_state():
     if not os.path.exists(STATE_FILE):
         return {
-            "last_seen_id": 0,
-            "last_update_ts": 0,
+            "seen": [],
+            "last_success_ts": 0,
+            "last_run_ts": 0,
             "last_heartbeat_ts": 0,
             "history": []
         }
@@ -40,31 +43,65 @@ def save_state(state):
 
 
 # =========================
+# DEDUPE
+# =========================
+
+def fingerprint(post):
+    return f"{post['thread_id']}:{post.get('version','')}:{post.get('title','')}"
+
+
+# =========================
 # DISCORD
 # =========================
 
 def send_discord(embed):
     if not WEBHOOK:
-        raise ValueError("DISCORD_WEBHOOK missing")
+        raise ValueError("Missing DISCORD_WEBHOOK")
 
-    try:
-        r = requests.post(WEBHOOK, json={"embeds": [embed]}, timeout=15)
-        print("Discord:", r.status_code)
-    except Exception as e:
-        print("Discord error:", e)
+    requests.post(WEBHOOK, json={"embeds": [embed]}, timeout=15)
 
 
-# =========================
-# LOGGING HELPERS
-# =========================
-
-def log_event(title, description, color=3447003):
+def log(title, desc, color=3447003):
     send_discord({
         "title": title,
-        "description": description,
+        "description": desc,
         "color": color,
         "timestamp": datetime.utcnow().isoformat()
     })
+
+
+# =========================
+# FETCH (RETRY)
+# =========================
+
+def fetch_posts():
+    delay = 2
+
+    for _ in range(3):
+        try:
+            r = requests.get(API_URL, timeout=30)
+            r.raise_for_status()
+            return r.json()["msg"]["data"]
+        except Exception as e:
+            print("Fetch error:", e)
+            time.sleep(delay)
+            delay *= 2
+
+    return []
+
+
+# =========================
+# RECOVERY
+# =========================
+
+def should_recover(state):
+    return time.time() - state.get("last_success_ts", 0) > RECOVERY_HOURS * 3600
+
+
+def recovery_limit(state, posts):
+    spike = sum(state.get("history", [])[-5:]) > 30
+    limit = 5 if spike else RECOVERY_LIMIT
+    return posts[:limit]
 
 
 # =========================
@@ -75,59 +112,22 @@ def heartbeat(state):
     now = time.time()
 
     if now - state.get("last_heartbeat_ts", 0) > HEARTBEAT_INTERVAL:
-        log_event(
-            "🟢 F95 Bot Heartbeat",
-            "Bot is running normally."
-        )
-
+        log("🟢 Heartbeat", "Bot is alive")
         state["last_heartbeat_ts"] = now
 
 
 # =========================
-# FETCH (RETRY INTELIGENTE)
+# WATCHDOG
 # =========================
 
-def fetch_posts():
-    delay = 2
-
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            r = requests.get(API_URL, timeout=30)
-            r.raise_for_status()
-            return r.json()["msg"]["data"]
-
-        except Exception as e:
-            print(f"Fetch attempt {attempt} failed:", e)
-
-            if attempt < MAX_RETRIES:
-                time.sleep(delay)
-                delay *= 2  # backoff exponencial
-
-    return []
+def check_watchdog(state):
+    now = time.time()
+    if now - state.get("last_run_ts", 0) > 15 * 60:
+        log("🚨 CRON ALERT", "Possible GitHub Actions failure", color=16711680)
 
 
 # =========================
-# MAIN DISCORD POST
-# =========================
-
-def send_post(post):
-    embed = {
-        "title": post.get("title", "No title"),
-        "url": f"https://f95zone.to/threads/{post['thread_id']}",
-        "color": 65280,
-        "image": {"url": post.get("cover", "")},
-        "fields": [
-            {"name": "Creator", "value": post.get("creator", "N/A"), "inline": True},
-            {"name": "Version", "value": post.get("version", "N/A"), "inline": True}
-        ],
-        "timestamp": datetime.utcnow().isoformat()
-    }
-
-    send_discord(embed)
-
-
-# =========================
-# CORE
+# MAIN
 # =========================
 
 def run():
@@ -135,53 +135,61 @@ def run():
 
     state = load_state()
 
+    state["last_run_ts"] = time.time()
+
+    auto_heal_workflow(state)
+
     posts = fetch_posts()
     if not posts:
-        print("No posts fetched")
+        log("❌ Fetch failed", "No data from API", 16711680)
         return
 
     posts.sort(key=lambda x: int(x["thread_id"]), reverse=True)
 
-    last_seen = state["last_seen_id"]
-    new_last_seen = last_seen
+    seen = set(state.get("seen", []))
+    new_seen = set(seen)
+
+    recovery = should_recover(state)
+
+    if recovery:
+        log("🟠 Recovery mode", "Rebuilding state")
+        posts = recovery_limit(state, posts)
 
     sent = 0
 
     for post in posts:
-        pid = int(post["thread_id"])
+        fp = fingerprint(post)
 
-        if pid <= last_seen:
+        if fp in seen:
             continue
 
-        send_post(post)
+        send_discord({
+            "title": post.get("title"),
+            "url": f"https://f95zone.to/threads/{post['thread_id']}",
+            "color": 65280,
+            "image": {"url": post.get("cover", "")},
+            "fields": [
+                {"name": "Creator", "value": post.get("creator", "N/A"), "inline": True},
+                {"name": "Version", "value": post.get("version", "N/A"), "inline": True}
+            ],
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+        new_seen.add(fp)
         sent += 1
 
-        if pid > new_last_seen:
-            new_last_seen = pid
-
-    state["last_seen_id"] = new_last_seen
-    state["last_update_ts"] = time.time()
-
+    state["seen"] = list(new_seen)[-500:]
+    state["last_success_ts"] = time.time()
     state["history"].append(sent)
     state["history"] = state["history"][-20:]
 
-    # 🟢 heartbeat + logging
     heartbeat(state)
-
-    if sent > 0:
-        log_event(
-            "📦 Posts sent",
-            f"New posts delivered: {sent}",
-            color=3066993
-        )
+    check_watchdog(state)
 
     save_state(state)
 
     print(f"✅ Done - sent {sent}")
 
-
-if __name__ == "__main__":
-    run()
 
 if __name__ == "__main__":
     run()
