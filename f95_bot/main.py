@@ -1,45 +1,118 @@
-from f95_bot.client import fetch_posts, send_to_discord
-from f95_bot.state import load_state, save_state, update_heartbeat
+import time
+import hashlib
 
+from f95_bot.client import (
+    fetch_posts,
+    send_discord,
+    send_alert,
+    build_embed
+)
+
+from f95_bot.state import (
+    load_state,
+    save_state,
+    update_heartbeat
+)
+
+# =========================
+# CONFIG
+# =========================
+
+MAX_SEEN = 5000
+
+
+# =========================
+# HASH SYSTEM
+# =========================
+
+def make_hash(post):
+    raw = f"{post.get('thread_id')}:{post.get('title')}:{post.get('version')}"
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+# =========================
+# MAIN
+# =========================
 
 def run():
+    print("🚀 Starting F95 Engine")
+
     state = load_state()
+
+    seen = set(state.get("seen", []))
 
     posts = fetch_posts()
 
+    # =========================
+    # EMPTY API PROTECTION
+    # =========================
+
     if not posts:
-        print("No posts fetched")
+        print("⚠️ Empty API response")
+
+        send_alert(
+            "⚠️ F95 API Empty",
+            "API returned zero posts."
+        )
+
         return
 
-    # ordenar mais recente → mais antigo
-    posts.sort(key=lambda x: int(x["thread_id"]), reverse=True)
+    # =========================
+    # ORDERING
+    # =========================
 
-    last_seen = state.get("last_seen_id", 0)
+    posts.sort(
+        key=lambda x: int(x.get("thread_id", 0)),
+        reverse=True
+    )
 
-    new_last_seen = last_seen
+    new_seen = set(seen)
+
     sent = 0
 
+    # =========================
+    # PROCESS POSTS
+    # =========================
+
     for post in posts:
-        pid = int(post["thread_id"])
 
-        if pid <= last_seen:
-            continue
+        try:
+            post_hash = make_hash(post)
 
-        send_to_discord(post)
-        sent += 1
+            # anti-duplication
+            if post_hash in seen:
+                continue
 
-        if pid > new_last_seen:
-            new_last_seen = pid
+            # send
+            send_discord(build_embed(post))
 
-    state["last_seen_id"] = new_last_seen
+            # mark seen only AFTER successful send
+            new_seen.add(post_hash)
 
-    state["history"].append(sent)
-    state["history"] = state["history"][-20:]
+            sent += 1
+
+            print(f"✅ Sent: {post.get('title')}")
+
+            # small protection delay
+            time.sleep(1)
+
+        except Exception as e:
+            print("POST ERROR:", e)
+
+    # =========================
+    # CLEAN STATE
+    # =========================
+
+    if len(new_seen) > MAX_SEEN:
+        new_seen = set(list(new_seen)[-MAX_SEEN:])
+
+    state["seen"] = list(new_seen)
 
     update_heartbeat(state)
+
     save_state(state)
 
-    print(f"ZERO LOSS MODE - sent {sent} posts")
+    print(f"🎯 Cycle complete | Sent: {sent}")
 
 
 if __name__ == "__main__":
