@@ -12,7 +12,7 @@ def fetch_posts():
             r.raise_for_status()
             return r.json()["msg"]["data"]
         except Exception as e:
-            print("API error retrying:", e)
+            print("API retry error:", e)
 
     return []
 
