@@ -36,12 +36,16 @@ jobs:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: python f95_bot.py
 
-      - name: Commit state
+      # =========================
+      # SAFE COMMIT (NO REBASE, NO CONFLICTS)
+      # =========================
+      - name: Commit state safely
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
-          git pull --rebase origin main || true
+          git fetch origin main
+          git reset --hard origin/main
 
           git add state.json
 
