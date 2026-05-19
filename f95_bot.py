@@ -9,6 +9,13 @@ WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 STATE_FILE = "state.json"
 
+# =========================
+# CONFIG
+# =========================
+
+HEARTBEAT_INTERVAL = 6 * 60 * 60  # 6h
+MAX_RETRIES = 3
+
 
 # =========================
 # STATE
@@ -19,6 +26,7 @@ def load_state():
         return {
             "last_seen_id": 0,
             "last_update_ts": 0,
+            "last_heartbeat_ts": 0,
             "history": []
         }
 
@@ -32,27 +40,77 @@ def save_state(state):
 
 
 # =========================
-# FETCH
-# =========================
-
-def fetch_posts():
-    try:
-        r = requests.get(API_URL, timeout=30)
-        r.raise_for_status()
-        return r.json()["msg"]["data"]
-    except Exception as e:
-        print("Fetch error:", e)
-        return []
-
-
-# =========================
 # DISCORD
 # =========================
 
-def send_discord(post):
+def send_discord(embed):
     if not WEBHOOK:
         raise ValueError("DISCORD_WEBHOOK missing")
 
+    try:
+        r = requests.post(WEBHOOK, json={"embeds": [embed]}, timeout=15)
+        print("Discord:", r.status_code)
+    except Exception as e:
+        print("Discord error:", e)
+
+
+# =========================
+# LOGGING HELPERS
+# =========================
+
+def log_event(title, description, color=3447003):
+    send_discord({
+        "title": title,
+        "description": description,
+        "color": color,
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+
+# =========================
+# HEARTBEAT
+# =========================
+
+def heartbeat(state):
+    now = time.time()
+
+    if now - state.get("last_heartbeat_ts", 0) > HEARTBEAT_INTERVAL:
+        log_event(
+            "🟢 F95 Bot Heartbeat",
+            "Bot is running normally."
+        )
+
+        state["last_heartbeat_ts"] = now
+
+
+# =========================
+# FETCH (RETRY INTELIGENTE)
+# =========================
+
+def fetch_posts():
+    delay = 2
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            r = requests.get(API_URL, timeout=30)
+            r.raise_for_status()
+            return r.json()["msg"]["data"]
+
+        except Exception as e:
+            print(f"Fetch attempt {attempt} failed:", e)
+
+            if attempt < MAX_RETRIES:
+                time.sleep(delay)
+                delay *= 2  # backoff exponencial
+
+    return []
+
+
+# =========================
+# MAIN DISCORD POST
+# =========================
+
+def send_post(post):
     embed = {
         "title": post.get("title", "No title"),
         "url": f"https://f95zone.to/threads/{post['thread_id']}",
@@ -65,8 +123,7 @@ def send_discord(post):
         "timestamp": datetime.utcnow().isoformat()
     }
 
-    r = requests.post(WEBHOOK, json={"embeds": [embed]}, timeout=15)
-    print("Discord:", r.status_code)
+    send_discord(embed)
 
 
 # =========================
@@ -80,7 +137,7 @@ def run():
 
     posts = fetch_posts()
     if not posts:
-        print("No posts found")
+        print("No posts fetched")
         return
 
     posts.sort(key=lambda x: int(x["thread_id"]), reverse=True)
@@ -96,7 +153,7 @@ def run():
         if pid <= last_seen:
             continue
 
-        send_discord(post)
+        send_post(post)
         sent += 1
 
         if pid > new_last_seen:
@@ -108,10 +165,23 @@ def run():
     state["history"].append(sent)
     state["history"] = state["history"][-20:]
 
+    # 🟢 heartbeat + logging
+    heartbeat(state)
+
+    if sent > 0:
+        log_event(
+            "📦 Posts sent",
+            f"New posts delivered: {sent}",
+            color=3066993
+        )
+
     save_state(state)
 
     print(f"✅ Done - sent {sent}")
 
+
+if __name__ == "__main__":
+    run()
 
 if __name__ == "__main__":
     run()
