@@ -1,98 +1,107 @@
-import requests
-import json
-import os
-import time
+name: F95 Discord Bot
 
-API_URL = "https://f95zone.to/sam/latest_alpha/latest_data.php?cmd=list&cat=games&page=1&sort=date"
-WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
-STATE_FILE = "last_seen.json"
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
 
-# load state safely
-def load_state():
-    try:
-        if os.path.exists(STATE_FILE):
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
-                return set(json.load(f))
-    except:
-        pass
-    return set()
+permissions:
+  contents: write
 
-def save_state(state):
-    try:
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(list(state)[-500:], f)
-    except Exception as e:
-        print("STATE SAVE ERROR:", e)
+# =========================
+# PREVENT RUN OVERLAPS
+# =========================
+concurrency:
+  group: f95-discord-bot
+  cancel-in-progress: true
 
-seen = load_state()
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
 
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-def send_to_discord(post):
-    try:
-        embed = {
-            "title": post.get("title", "No title"),
-            "url": f"https://f95zone.to/threads/{post['thread_id']}",
-            "color": 65280,
-            "image": {"url": post.get("cover", "")},
-            "fields": [
-                {"name": "Creator", "value": post.get("creator", "Unknown"), "inline": True},
-                {"name": "Version", "value": post.get("version", "N/A"), "inline": True},
-                {"name": "Rating", "value": str(post.get("rating", "0")), "inline": True}
-            ],
-            "footer": {"text": "F95 Bot - stable mode"}
-        }
+      # =========================
+      # SAFE PYTHON SETUP
+      # =========================
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-        r = requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=15)
-        print("Discord status:", r.status_code)
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests feedparser feedgen
 
-        return r.status_code == 204
+      # =========================
+      # GUARANTEED STATE FILE
+      # =========================
+      - name: Ensure state file exists
+        run: |
+          if [ ! -f last_seen.json ]; then
+            echo '{"seen":[],"last_update_ts":0,"last_heartbeat_ts":0,"history_intervals":[]}' > last_seen.json
+          fi
 
-    except Exception as e:
-        print("DISCORD ERROR:", e)
-        return False
+      # =========================
+      # RUN BOT
+      # =========================
+      - name: Run bot
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          set -e
+          echo "🚀 Running bot..."
+          python f95_discord_bot.py
 
+      # =========================
+      # DEBUG SAFETY (helps silent failures)
+      # =========================
+      - name: Debug state
+        if: always()
+        run: |
+          echo "==== STATE FILE ===="
+          cat last_seen.json || true
 
-def fetch_posts():
-    try:
-        r = requests.get(API_URL, timeout=20)
-        r.raise_for_status()
-        return r.json()["msg"]["data"]
-    except Exception as e:
-        print("API ERROR:", e)
-        return []
+      # =========================
+      # COMMIT SAFELY (NO RACE CONDITIONS)
+      # =========================
+      - name: Commit state safely
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
 
+          # IMPORTANT: re-sync before commit (prevents conflicts)
+          git pull --rebase origin main || true
 
-def run():
-    global seen
+          git add last_seen.json
 
-    print("Checking API...")
+          # only commit if changes exist
+          git diff --cached --quiet && echo "No changes" && exit 0
 
-    posts = fetch_posts()
-    if not posts:
-        print("No data received")
-        return
+          git commit -m "chore: update bot state [skip ci]"
 
-    new_count = 0
+      # =========================
+      # SAFE PUSH WITH RETRIES
+      # =========================
+      - name: Push changes safely
+        run: |
+          for i in 1 2 3; do
+            git push origin main && break
+            echo "⚠️ Push failed, retrying..."
+            git pull --rebase origin main || true
+            sleep 3
+          done
 
-    for post in posts:
-        pid = str(post["thread_id"])
-
-        if pid not in seen:
-            print("NEW:", post["title"])
-
-            success = send_to_discord(post)
-
-            if success:
-                seen.add(pid)
-                new_count += 1
-
-                # save incrementally (prevents data loss)
-                save_state(seen)
-
-    print(f"Done. New posts sent: {new_count}")
-
-
-if __name__ == "__main__":
-    run()
-if __name__ == "__main__":
-    build()
+      # =========================
+      # FINAL HEALTH CHECK
+      # =========================
+      - name: Workflow health check
+        if: always()
+        run: |
+          echo "✅ Workflow finished"
