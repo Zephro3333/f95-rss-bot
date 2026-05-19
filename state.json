@@ -1,5 +1,7 @@
 {
-  "last_seen_id": 0,
-  "last_update_ts": 0,
+  "seen": [],
+  "last_success_ts": 0,
+  "last_run_ts": 0,
+  "last_heartbeat_ts": 0,
   "history": []
 }
