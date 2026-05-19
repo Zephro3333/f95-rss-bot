@@ -1,6 +1,5 @@
-from client import fetch_posts, send_to_discord
-from state import load_state, save_state, update_heartbeat
-import time
+from f95_bot.client import fetch_posts, send_to_discord
+from f95_bot.state import load_state, save_state, update_heartbeat
 
 
 def run():
