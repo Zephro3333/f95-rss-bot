@@ -1,6 +1,5 @@
 {
-  "seen": [],
-  "last_heartbeat_ts": 0,
+  "last_seen_id": 0,
   "last_run_ts": 0,
   "history": []
 }
