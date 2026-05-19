@@ -1,6 +1,5 @@
 from client import fetch_posts, send_to_discord
 from state import load_state, save_state, update_heartbeat
-from monitor import detect_silent_failure, detect_spike
 import time
 
 
@@ -9,35 +8,40 @@ def run():
 
     posts = fetch_posts()
 
-    # silent failure detection
-    if detect_silent_failure(state):
-        print("⚠️ Silent failure detected")
+    if not posts:
+        print("No posts fetched")
+        return
 
-    seen = set(state.get("seen", []))
+    # ordenar do mais recente → mais antigo
+    posts.sort(key=lambda x: int(x["thread_id"]), reverse=True)
 
+    last_seen = state.get("last_seen_id", 0)
+
+    new_last_seen = last_seen
     sent = 0
 
     for post in posts:
-        pid = str(post["thread_id"])
+        pid = int(post["thread_id"])
 
-        if pid not in seen:
-            send_to_discord(post)
-            seen.add(pid)
-            sent += 1
+        # ZERO LOSS: já processado
+        if pid <= last_seen:
+            continue
 
-    # update state safely
-    state["seen"] = list(seen)
+        send_to_discord(post)
+        sent += 1
 
-    state["last_run_ts"] = int(time.time())
+        if pid > new_last_seen:
+            new_last_seen = pid
 
-    state["history"].append(len(posts))
-    state["history"] = state["history"][-20:]  # limita memória
+    state["last_seen_id"] = new_last_seen
+
+    state["history"].append(sent)
+    state["history"] = state["history"][-20:]
 
     update_heartbeat(state)
-
     save_state(state)
 
-    print(f"OK - sent {sent} posts")
+    print(f"ZERO LOSS MODE - sent {sent} posts")
 
 
 if __name__ == "__main__":
