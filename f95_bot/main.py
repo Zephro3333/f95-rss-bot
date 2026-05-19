@@ -11,7 +11,7 @@ def run():
         print("No posts fetched")
         return
 
-    # ordenar do mais recente → mais antigo
+    # ordenar mais recente → mais antigo
     posts.sort(key=lambda x: int(x["thread_id"]), reverse=True)
 
     last_seen = state.get("last_seen_id", 0)
@@ -22,7 +22,6 @@ def run():
     for post in posts:
         pid = int(post["thread_id"])
 
-        # ZERO LOSS: já processado
         if pid <= last_seen:
             continue
 
