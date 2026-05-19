@@ -1,26 +1,21 @@
-# f95_bot/monitor.py
-
 import time
+import statistics
 
+SILENT_LIMIT = 5 * 60 * 60  # 5h
 SPIKE_THRESHOLD = 15
-SILENT_THRESHOLD = 5 * 60 * 60  # 5h
-
-
-def detect_spike(current_count, state):
-    history = state.get("history_intervals", [])
-
-    if len(history) < 5:
-        return False
-
-    avg = sum(history[-5:]) / 5
-
-    return current_count > avg + SPIKE_THRESHOLD
 
 
 def detect_silent_failure(state):
     last = state.get("last_heartbeat_ts", 0)
+    return last and (time.time() - last > SILENT_LIMIT)
 
-    if last == 0:
+
+def detect_spike(current, state):
+    history = state.get("history", [])
+
+    if len(history) < 5:
         return False
 
-    return (time.time() - last) > SILENT_THRESHOLD
+    baseline = statistics.median(history[-10:])
+
+    return current > baseline + SPIKE_THRESHOLD
