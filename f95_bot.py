@@ -70,11 +70,11 @@ def send_discord(post):
 
 
 # =========================
-# CORE LOGIC
+# CORE
 # =========================
 
 def run():
-    print("🚀 F95 Bot starting...")
+    print("🚀 Bot started")
 
     state = load_state()
 
@@ -110,7 +110,7 @@ def run():
 
     save_state(state)
 
-    print(f"✅ Done - sent {sent} posts")
+    print(f"✅ Done - sent {sent}")
 
 
 if __name__ == "__main__":
