@@ -1,35 +1,37 @@
-# f95_bot/main.py
-
 from client import fetch_posts, send_to_discord
 from state import load_state, save_state, update_heartbeat
-from monitor import detect_spike, detect_silent_failure
+from monitor import detect_silent_failure, detect_spike
 import time
+
 
 def run():
     state = load_state()
 
     posts = fetch_posts()
 
+    # silent failure detection
     if detect_silent_failure(state):
-        print("⚠️ Silent failure detected, forcing refresh mode")
+        print("⚠️ Silent failure detected")
 
-    spike = detect_spike(len(posts), state)
+    seen = set(state.get("seen", []))
 
     sent = 0
 
     for post in posts:
         pid = str(post["thread_id"])
 
-        if pid not in state["seen"]:
+        if pid not in seen:
             send_to_discord(post)
-            state["seen"].add(pid)
+            seen.add(pid)
             sent += 1
 
-    state["last_run_ts"] = int(time.time())
-    state["last_sent"] = sent
+    # update state safely
+    state["seen"] = list(seen)
 
-    if spike:
-        state["history_intervals"].append(len(posts))
+    state["last_run_ts"] = int(time.time())
+
+    state["history"].append(len(posts))
+    state["history"] = state["history"][-20:]  # limita memória
 
     update_heartbeat(state)
 
