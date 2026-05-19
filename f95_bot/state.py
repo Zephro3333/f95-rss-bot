@@ -8,8 +8,7 @@ STATE_FILE = "state/last_seen.json"
 def load_state():
     if not os.path.exists(STATE_FILE):
         return {
-            "seen": [],
-            "last_heartbeat_ts": 0,
+            "last_seen_id": 0,
             "last_run_ts": 0,
             "history": []
         }
@@ -22,8 +21,8 @@ def save_state(state):
     os.makedirs("state", exist_ok=True)
 
     with open(STATE_FILE, "w") as f:
-        json.dump(state, f)
+        json.dump(state, f, indent=2)
 
 
 def update_heartbeat(state):
-    state["last_heartbeat_ts"] = int(time.time())
+    state["last_run_ts"] = int(time.time())
