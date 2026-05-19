@@ -1,49 +1,51 @@
-name: F95 Bot
+name: F95 Discord Bot
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
-
+    - cron: "*/5 * * * *"
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 concurrency:
   group: f95-bot
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
-  run-bot:
+  bot:
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: write
+    timeout-minutes: 10
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install requirements
-        run: pip install -r requirements.txt
+      - name: Install dependencies
+        run: pip install requests
 
       - name: Run bot
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: python -m f95_bot.main
+        run: python f95_bot.py
 
       - name: Commit state
         run: |
           git config user.name "github-actions"
-          git config user.email "actions@github.com"
+          git config user.email "github-actions@github.com"
 
-          git add state/last_seen.json
+          git pull --rebase origin main || true
 
-          git diff --cached --quiet || git commit -m "Update state"
+          git add state.json
 
-          git pull --rebase origin main
+          git diff --cached --quiet && exit 0
 
-          git push
+          git commit -m "update state"
+          git push origin main
