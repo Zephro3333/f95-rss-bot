@@ -41,3 +41,110 @@ f95-bot
 │ └── last_seen.json # Estado dos posts já enviados
 ├── requirements.txt
 └── README.md
+
+
+---
+
+# 🔑 Configuração
+
+## 1. Criar Discord Webhook
+
+No Discord:
+- Canal → Settings → Integrations → Webhooks
+- Criar webhook
+- Copiar URL
+
+---
+
+## 2. Adicionar no GitHub Secrets
+
+No repositório:
+Settings → Secrets and variables → Actions → New secret
+
+Adicionar:
+DISCORD_WEBHOOK = https://discord.com/api/webhooks/XXXX
+
+---
+
+## 3. Ativar GitHub Actions
+
+O bot já funciona automaticamente após push para `main`.
+
+Também pode ser executado manualmente via:
+Actions → Run workflow
+
+
+---
+
+# ⏱️ Frequência
+
+- Executa a cada **5 minutos**
+- Sem necessidade de servidor
+- Totalmente serverless
+
+---
+
+# 🧠 Sistema de proteção
+
+O bot inclui:
+
+### ✔ Anti-duplicação
+Evita enviar posts repetidos usando `state/last_seen.json`
+
+### ✔ Auto-recovery
+Se houver falhas temporárias, o próximo ciclo recupera automaticamente
+
+### ✔ Spike handling
+Detecta aumentos anormais de posts e ajusta comportamento
+
+### ✔ Silent failure detection
+Detecta se o bot ficou demasiado tempo sem atividade
+
+---
+
+# 📊 Estado do sistema
+
+O ficheiro:
+state/last_seen.json
+
+guarda:
+
+- posts já enviados
+- timestamp do último run
+- heartbeat interno
+- histórico de atividade
+
+---
+
+# ⚠️ Limitações
+
+- Depende de GitHub Actions (limite de execução)
+- Delay mínimo: ~1–2 minutos
+- Webhook do Discord pode ser rate-limited em spam extremo
+
+---
+
+# 🚀 Possíveis upgrades
+
+- Dashboard web (monitorização real-time)
+- Multi-feed support
+- Redis database (substituir JSON state)
+- Alertas de falha no Discord
+- Sistema de prioridade de posts
+
+---
+
+# 📌 Autor
+
+Bot desenvolvido como sistema automatizado de monitorização e notificação em tempo real para comunidades Discord.
+
+---
+
+# 🧩 Nota final
+
+Este projeto foi desenhado para ser:
+
+✔ leve  
+✔ resiliente  
+✔ auto-recuperável  
+✔ 100% automatizado via GitHub Actions
